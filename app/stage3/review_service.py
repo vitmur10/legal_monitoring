@@ -4,6 +4,7 @@ import re
 from typing import Any
 from uuid import uuid4
 from hashlib import sha256
+from urllib.parse import urlparse
 
 from app.ai.content_service import AIContentService
 from app.ai.schemas import ContentGenerationResult, FullAnalysisResult, Stage2Input
@@ -164,6 +165,11 @@ class ReviewService:
         content = self._current_content(version)
         analysis = dict((metadata.get("stage2") or {}).get("analysis") or {})
         analysis["official_source_url"] = version.document.canonical_url
+        analysis["source_published_at"] = (
+            version.document.published_at.date().isoformat()
+            if version.document.published_at
+            else None
+        )
         analysis.setdefault("document_type", version.document.document_type)
         attempt_id = await self._start_attempt(version, "knowledge_base", content.knowledge_base_article)
         result = await self.knowledge_base_service.publish_to_knowledge_base(
@@ -380,8 +386,19 @@ class ReviewService:
             )
         metadata, stage3 = self._ensure_stage3(version)
         content = self._current_content(version)
+        analysis = (version.version_metadata or {}).get("stage2", {}).get("analysis", {})
+        channel_text = self.render_channel_post(
+            content.telegram_post,
+            title=version.document.title,
+            source_url=version.document.canonical_url or analysis.get("official_source_url"),
+            tags=self._hashtags(
+                [label(value) for value in (analysis.get("topics") or analysis.get("categories") or [])]
+            ),
+        )
         if payload.dry_run:
-            preview = await self.publisher.publish(version_id=version.id, text=self.render_channel_post(content.telegram_post), dry_run=True)
+            preview = await self.publisher.publish(
+                version_id=version.id, text=channel_text, dry_run=True, parse_mode="HTML"
+            )
             return PublishActionResult(version_id=version.id, status=PublicationStatus.APPROVED, target=preview.target, message_id=preview.message_id, published_at=preview.published_at)
         stage3["publication_choice"] = "TELEGRAM_WITH_KNOWLEDGE_BASE" if payload.include_knowledge_base else "TELEGRAM"
         self._save_stage3(version, metadata, stage3)
@@ -391,7 +408,7 @@ class ReviewService:
         short_key = f"{publication_prefix}:telegram_post"
         article_key_prefix = f"{publication_prefix}:knowledge_base_article:"
         publication_plan = [
-            (short_key, self.render_channel_post(content.telegram_post), None)
+            (short_key, channel_text, "HTML")
         ]
         last_result = None
         attempt_id = None
@@ -761,11 +778,14 @@ class ReviewService:
             version_id=version.id,
             title=version.document.title,
             source_url=version.document.canonical_url,
+            source_origin=urlparse(version.document.canonical_url or "").hostname,
             status=self._status(version),
             importance=analysis.get("importance"),
             categories=list(analysis.get("categories") or []),
             summary=analysis.get("summary"),
             document_status=analysis.get("document_status"),
+            document_date=analysis.get("document_date"),
+            source_published_at=version.document.published_at,
             effective_date=analysis.get("effective_date"),
             affected_entities=list(analysis.get("affected_entities") or []),
             practical_impact=analysis.get("practical_impact"),
@@ -778,6 +798,11 @@ class ReviewService:
     def _render_moderation_card(self, item: ReviewItemRead, content_version: int) -> str:
         categories = ", ".join(label(x) for x in item.categories) or "не визначено"
         affected = ", ".join(label(x) for x in item.affected_entities) or "не визначено"
+        source_published_date = (
+            item.source_published_at.date().isoformat()
+            if item.source_published_at
+            else "не визначена"
+        )
         text = (
             "МАТЕРІАЛ НА ПОГОДЖЕННЯ\n"
             f"Draft v{content_version}\n\n"
@@ -789,17 +814,58 @@ class ReviewService:
             f"Важливість: {label(item.importance)}\n"
             f"Категорії: {categories}\n"
             f"Статус документа: {label(item.document_status)}\n"
+            f"Дата документа: {item.document_date or 'не визначена'}\n"
+            f"Дата публікації на джерелі: {source_published_date}\n"
             f"Набрання чинності: {item.effective_date or 'не визначено'}\n"
             f"Кого стосується: {affected}\n"
             f"Рекомендація щодо Бази: {label(item.knowledge_base_recommendation.recommendation.value)}\n"
             f"Причина рекомендації: {item.knowledge_base_recommendation.reason[:250]}\n"
+            f"Сайт-джерело: {item.source_origin or 'не визначено'}\n"
             f"Офіційне джерело: {item.source_url or 'не вказано'}"
         )
         return text[:4096]
 
     @staticmethod
-    def render_channel_post(text: str) -> str:
-        return ReviewService._clean_plain_markdown(text)
+    def render_channel_post(
+        text: str,
+        *,
+        title: str | None = None,
+        source_url: str | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        body = ReviewService._clean_plain_markdown(text)
+        if title and body.splitlines() and body.splitlines()[0].strip().casefold() == title.strip().casefold():
+            body = "\n".join(body.splitlines()[1:]).lstrip()
+        sections: list[str] = []
+        if title:
+            sections.append(f"<b>{html.escape(title.strip()[:250])}</b>")
+        sections.append(html.escape(body[:3300]))
+        if source_url:
+            host = urlparse(source_url).hostname
+            if source_url in body:
+                source_line = f"Джерело: {host}" if host else "Джерело: офіційне посилання наведено вище"
+            else:
+                source_line = f"Джерело: {host} — {source_url}" if host else f"Джерело: {source_url}"
+            sections.append(html.escape(source_line))
+        if tags:
+            hashtags = ReviewService._hashtags(tags)
+            if hashtags:
+                sections.append(" ".join(f"#{html.escape(tag)}" for tag in hashtags))
+        return "\n\n".join(sections)[:4096]
+
+    @staticmethod
+    def _hashtags(values: list[str], limit: int = 3) -> list[str]:
+        results: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            words = re.findall(r"[\w]+", str(value), flags=re.UNICODE)
+            tag = "_".join(words)[:35].strip("_")
+            if tag and tag.casefold() not in seen:
+                results.append(tag)
+                seen.add(tag.casefold())
+            if len(results) >= limit:
+                break
+        return results
 
     @staticmethod
     def render_full_article(text: str, *, include_header: bool = True) -> str:

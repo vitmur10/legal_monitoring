@@ -96,11 +96,13 @@ def test_ukrainian_notion_properties_and_full_article():
     client = NotionClient(token=None, database_id=None)
     payload = client._page_payload("Назва", {"importance": "HIGH", "document_status": "EXPLANATION", "categories": ["VAT"], "affected_entities": ["FOP"]}, "Стаття" * 1000, 1, 2, 1, "key", None, "old-page")
     props = payload["properties"]
-    expected = ["Назва", "Дата документа", "Номер документа", "Дата набрання чинності", "Дата початку застосування", "Статус документа", "Тип документа", "Орган", "Напрям", "Теми", "Кого стосується", "Що змінилося", "Практичний вплив", "Необхідні дії", "Строки", "Ризики", "Важливість", "Рекомендація щодо Бази", "Офіційне джерело", "Статус публікації", "Повний текст статті"]
+    expected = ["Назва", "Дата документа", "Дата публікації джерела", "Номер документа", "Дата набрання чинності", "Дата початку застосування", "Статус документа", "Тип документа", "Орган", "Напрям", "Теми", "Кого стосується", "Що змінилося", "Практичний вплив", "Необхідні дії", "Строки", "Ризики", "Важливість", "Рекомендація щодо Бази", "Офіційне джерело", "Статус публікації", "Повний текст статті"]
     assert all(name in props for name in expected)
     assert props["Важливість"]["select"]["name"] == "Висока"
     assert props["Статус документа"]["select"]["name"] == "Офіційне роз’яснення"
     assert props["Кого стосується"]["multi_select"] == [{"name": "ФОП"}]
+    payload = client._page_payload("Назва", {"source_published_at": "2026-09-09"}, "Текст статті", 1, 2, 1, "key", None, None)
+    assert payload["properties"]["Дата публікації джерела"]["date"]["start"] == "2026-09-09"
     assert "".join(t["text"]["content"] for t in props["Повний текст статті"]["rich_text"]) == "Стаття" * 1000
 
 
@@ -108,7 +110,7 @@ async def test_moderation_card_and_buttons():
     version, telegram, adapter, service, workflow = setup()
     item = (await service.list_items())[0]
     text = service._render_moderation_card(item, 1)
-    for field in ["Статус документа", "Набрання чинності", "Важливість", "Кого стосується", "Рекомендація щодо Бази", "Причина рекомендації", "Офіційне джерело"]:
+    for field in ["Статус документа", "Дата документа", "Дата публікації на джерелі", "Набрання чинності", "Важливість", "Кого стосується", "Рекомендація щодо Бази", "Причина рекомендації", "Сайт-джерело", "Офіційне джерело"]:
         assert field in text
     assert "Прийнятий" in text and "VAT_PAYERS" not in text
     buttons = TelegramBotClient._review_markup(10, 1)["inline_keyboard"]

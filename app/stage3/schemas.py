@@ -22,11 +22,14 @@ class ReviewItemRead(BaseModel):
     version_id: int
     title: str
     source_url: str | None = None
+    source_origin: str | None = None
     status: PublicationStatus
     importance: str | None = None
     categories: list[str] = Field(default_factory=list)
     summary: str | None = None
     document_status: str | None = None
+    document_date: str | None = None
+    source_published_at: datetime | None = None
     effective_date: str | None = None
     affected_entities: list[str] = Field(default_factory=list)
     practical_impact: str | None = None

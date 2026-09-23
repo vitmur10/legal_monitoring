@@ -9,6 +9,7 @@ from app.stage3.review_service import ReviewService
 from app.stage3.schemas import PublicationStatus, RevisionRequest
 from app.stage3.telegram_service import TelegramWorkflowService
 from app.knowledge_base.errors import PublicationRejected
+from app.knowledge_base.service import KnowledgeBaseService, KnowledgeBasePublicationResult
 
 
 class FakeRepository:
@@ -35,6 +36,7 @@ class FakeTelegram:
         self.cards = 0
         self.publications = 0
         self.published_texts: list[str] = []
+        self.parse_modes: list[str | None] = []
         self.answers: list[str] = []
         self.messages: list[str] = []
         self.message_actions: list[tuple[int | None, int | None]] = []
@@ -59,6 +61,7 @@ class FakeTelegram:
     ) -> PublishResult:
         self.publications += 1
         self.published_texts.append(text)
+        self.parse_modes.append(parse_mode)
         if (self.fail_first_publication and self.publications == 1) or (
             self.fail_on_publication == self.publications
         ):
@@ -109,6 +112,7 @@ def analyzed_version() -> DocumentVersion:
         identity_type="external_id",
         canonical_url="https://example.com/law",
         title="Тестова зміна",
+        published_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
         first_seen_at=datetime.now(timezone.utc),
         last_seen_at=datetime.now(timezone.utc),
     )
@@ -180,6 +184,68 @@ async def test_dispatch_is_idempotent_for_same_content_version() -> None:
     assert telegram.cards == 1
 
 
+async def test_moderation_card_includes_document_and_source_publication_dates() -> None:
+    version = analyzed_version()
+    version.version_metadata["stage2"]["analysis"]["document_date"] = "2026-09-08"
+    version.document.published_at = datetime(2026, 9, 9, tzinfo=timezone.utc)
+    telegram = FakeTelegram()
+    service = ReviewService(FakeRepository(version), telegram, moderation_client=telegram)
+
+    await service.dispatch_to_moderation(10)
+    card = service._render_moderation_card(service._to_review_item(version), 1)
+
+    assert "Дата документа: 2026-09-08" in card
+    assert "Дата публікації на джерелі: 2026-09-09" in card
+
+
+class FakeKnowledgeBase:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def publish(self, **kwargs):
+        self.calls += 1
+        return KnowledgeBasePublicationResult(status="PUBLISHED", page_id="page-1")
+
+
+async def test_add_to_knowledge_base_callback_after_telegram_published_is_idempotent() -> None:
+    version = analyzed_version()
+    version.version_metadata["stage3"] = {
+        "status": PublicationStatus.PUBLISHED.value,
+        "content_version": 1,
+        "message_id": "telegram-1",
+        "publication_messages": [{"key": "v1:telegram_post", "message_id": "telegram-1"}],
+    }
+    telegram, adapter = FakeTelegram(), FakeKnowledgeBase()
+    service = ReviewService(
+        FakeRepository(version), telegram, moderation_client=telegram,
+        allowed_user_ids={77}, knowledge_base_service=KnowledgeBaseService(adapter),
+    )
+    workflow = TelegramWorkflowService(service)
+
+    first = await workflow.handle_update(callback("k"))
+    second = await workflow.handle_update(callback("k"))
+
+    assert first.detail == second.detail == "Додано в Базу знань"
+    assert adapter.calls == 1
+    assert telegram.publications == 0
+    assert telegram.messages == ["Додано в Базу знань", "Додано в Базу знань"]
+
+
+async def test_add_to_knowledge_base_before_telegram_explains_required_order() -> None:
+    version = analyzed_version()
+    telegram = FakeTelegram()
+    service = ReviewService(
+        FakeRepository(version), telegram, moderation_client=telegram, allowed_user_ids={77}
+    )
+
+    result = await TelegramWorkflowService(service).handle_update(callback("k"))
+
+    assert "Спершу оберіть" in result.detail
+    assert "повторної публікації в канал не буде" in result.detail
+    assert telegram.publications == 0
+    assert telegram.messages == [result.detail]
+
+
 async def test_unlisted_user_cannot_make_decision() -> None:
     telegram = FakeTelegram()
     service = ReviewService(
@@ -234,7 +300,10 @@ async def test_repeated_approve_callback_publishes_only_once() -> None:
     assert telegram.publications == 1
     assert version.version_metadata["stage3"]["message_id"] == "201"
     assert version.version_metadata["stage3"]["article_message_ids"] == []
-    assert "<b>" not in telegram.published_texts[0]
+    assert telegram.published_texts[0].startswith("<b>Тестова зміна</b>")
+    assert "Джерело: example.com — https://example.com/law" in telegram.published_texts[0]
+    assert "#ПДВ" in telegram.published_texts[0]
+    assert telegram.parse_modes == ["HTML"]
     assert len(telegram.published_texts) == 1
 
 

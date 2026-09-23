@@ -119,6 +119,10 @@ class NotionClient:
         for name, key in {"Дата документа": "document_date", "Дата набрання чинності": "effective_date", "Дата початку застосування": "application_date"}.items():
             value = analysis.get(key)
             properties[p(name)] = {"date": {"start": str(value)} if value else None}
+        source_published_at = analysis.get("source_published_at")
+        properties[p("Дата публікації джерела")] = {
+            "date": {"start": str(source_published_at)} if source_published_at else None
+        }
         for name, value in {
             "Номер документа": analysis.get("document_number"),
             "Що змінилося": "\n".join(x.get("explanation", "") for x in analysis.get("changes") or []),

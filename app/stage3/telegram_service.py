@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from app.stage3.review_service import ReviewService
@@ -7,6 +8,8 @@ from app.stage3.schemas import (
     RevisionRequest,
     TelegramUpdateResult,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramWorkflowService:
@@ -81,11 +84,22 @@ class TelegramWorkflowService:
             await self._answer(callback_id, text)
             return TelegramUpdateResult(handled=True, action="RECONCILIATION_REQUIRED", version_id=version_id, status=terminal_status, detail=text)
         if action in {"ADD_KNOWLEDGE_BASE", "APPROVE_WITH_KNOWLEDGE_BASE"} and terminal_status == PublicationStatus.PUBLISHED:
-            result = await self.review_service.publish_to_knowledge_base(version_id)
-            text = "Додано в Базу знань" if result and result.status == "PUBLISHED" else "База знань недоступна; повторіть спробу"
-            if result and result.status == "UNKNOWN":
-                text = "Результат Бази невідомий; потрібна звірка. Повторне створення заблоковано"
+            try:
+                result = await self.review_service.publish_to_knowledge_base(version_id)
+            except Exception as exc:
+                # Avoid logging exception text: provider errors may contain sensitive request details.
+                logger.error("knowledge_base_callback_failed version_id=%s error_type=%s", version_id, type(exc).__name__)
+                text = "Не вдалося додати до Бази. Перевірте журнал сервера перед повтором"
+            else:
+                text = "Додано в Базу знань" if result and result.status == "PUBLISHED" else "Не вдалося додати до Бази"
+                if result and result.status == "NOT_CONFIGURED":
+                    text = "Інтеграцію з Базою не налаштовано"
+                elif result and result.status == "FAILED":
+                    text = "База відхилила публікацію. Перевірте доступ або поля бази"
+                elif result and result.status == "UNKNOWN":
+                    text = "Результат Бази невідомий; потрібна звірка. Повтор заблоковано"
             await self._answer(callback_id, text)
+            await self._notify_chat(callback, text)
             return TelegramUpdateResult(handled=True, action=action, version_id=version_id, status=terminal_status, detail=text)
         if terminal_status in {PublicationStatus.PUBLISHED, PublicationStatus.REJECTED}:
             text = (
@@ -105,8 +119,10 @@ class TelegramWorkflowService:
         reviewer = self._display_name(user)
         decision = ReviewDecisionRequest(reviewer=reviewer, reviewer_id=user_id)
         if action == "ADD_KNOWLEDGE_BASE":
-            await self._answer(callback_id, "Спочатку опублікуйте погоджений матеріал у Telegram")
-            return TelegramUpdateResult(handled=True, action=action, version_id=version_id, status=terminal_status)
+            text = "Спершу оберіть «📢 Telegram» або «📚 Telegram + База». Після Telegram-публікації натисніть «📚 Додати в Базу» — повторної публікації в канал не буде."
+            await self._answer(callback_id, "Спочатку потрібна публікація в Telegram")
+            await self._notify_chat(callback, text)
+            return TelegramUpdateResult(handled=True, action=action, version_id=version_id, status=terminal_status, detail=text)
         if action in {"APPROVE", "APPROVE_WITH_KNOWLEDGE_BASE"}:
             result = await self.review_service.approve_and_publish(version_id, decision, include_knowledge_base=action == "APPROVE_WITH_KNOWLEDGE_BASE")
             status = result.status if result else None
@@ -193,6 +209,12 @@ class TelegramWorkflowService:
     async def _answer(self, callback_id: str, text: str) -> None:
         if callback_id and self.review_service.moderation_client is not None:
             await self.review_service.moderation_client.answer_callback(callback_id, text)
+
+    async def _notify_chat(self, callback: dict[str, Any], text: str) -> None:
+        client = self.review_service.moderation_client
+        chat_id = str(((callback.get("message") or {}).get("chat") or {}).get("id") or "")
+        if client is not None and chat_id:
+            await client.send_text(chat_id=chat_id, text=text)
 
     def _parse_callback(self, value: str) -> tuple[str, int, int] | None:
         parts = value.split(":")
