@@ -95,6 +95,12 @@ class AIContentService:
             except ValidationError as exc:
                 last_error = exc
                 continue
+            generated = self._ensure_official_source(
+                generated,
+                str(stage_input.official_url)
+                if stage_input.official_url
+                else analysis.official_source_url,
+            )
             format_error = self._validate_format(
                 generated,
                 analysis,
@@ -116,6 +122,16 @@ class AIContentService:
                 return nested
         return data
 
+    @staticmethod
+    def _ensure_official_source(
+        generated: ContentGenerationResult,
+        official_url: str | None,
+    ) -> ContentGenerationResult:
+        if not official_url or official_url in generated.telegram_post:
+            return generated
+        post = generated.telegram_post.rstrip() + f"\n\nДжерело: {official_url}"
+        return generated.model_copy(update={"telegram_post": post})
+
     def _validate_format(
         self,
         generated: ContentGenerationResult,
@@ -124,13 +140,7 @@ class AIContentService:
         revision_comment: str | None = None,
         current_content: ContentGenerationResult | None = None,
     ) -> str | None:
-        required_labels = ["Що змінилося:", "Кого стосується:", "Що зробити:", "Джерело:"]
-        if analysis.effective_date or analysis.document_date:
-            required_labels.append("Дата:")
-        missing = [label for label in required_labels if label not in generated.telegram_post]
         problems: list[str] = []
-        if missing:
-            problems.append("telegram_post пропускає обов'язкові рядки: " + ", ".join(missing))
         telegram_min = 300 if revision_comment else 450
         article_min = 600 if revision_comment else 1200
         if len(generated.telegram_post) > 3000 or (len(generated.telegram_post) < telegram_min and not generated.content_warnings):

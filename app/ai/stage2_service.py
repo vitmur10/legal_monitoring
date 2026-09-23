@@ -112,7 +112,7 @@ class Stage2AnalysisService:
                 content=content_metadata,
                 usage=usage,
             )
-        except (AIProviderError, ValidationError) as exc:
+        except (AIProviderError, ValidationError, ValueError) as exc:
             logger.warning(
                 "stage2_ai_failed document_id=%s version_id=%s error=%s",
                 document.id,

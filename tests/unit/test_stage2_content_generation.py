@@ -75,6 +75,11 @@ class FakeContentService:
         )
 
 
+class FailingContentService:
+    async def generate(self, stage_input, analysis):
+        raise ValueError("generated content failed validation")
+
+
 def response(request_type: str) -> AIResponse:
     return AIResponse(
         data={},
@@ -156,3 +161,22 @@ async def test_stage2_does_not_generate_content_for_filtered_out_document() -> N
     assert metadata["status"] == "FILTERED_OUT"
     assert metadata["content"] is None
     assert content_service.calls == 0
+
+
+async def test_content_validation_failure_is_recorded_as_ai_failed() -> None:
+    service = Stage2AnalysisService(
+        relevance_service=FakeRelevanceService(),
+        analysis_service=FakeAnalysisService(),
+        content_service=FailingContentService(),
+    )
+
+    metadata = await service.process(
+        status=ProcessingStatus.NEW,
+        document=document(),
+        current_version=version(),
+        source_code="dps",
+    )
+
+    assert metadata is not None
+    assert metadata["status"] == "AI_FAILED"
+    assert metadata["error"] == "generated content failed validation"

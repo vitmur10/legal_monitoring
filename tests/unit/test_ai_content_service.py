@@ -137,7 +137,7 @@ async def test_revision_payload_contains_format_rules_and_previous_content() -> 
     )
 
     payload = provider.calls[0]["user_payload"]
-    assert payload["schema_version"] == "v3"
+    assert payload["schema_version"] == "v4"
     assert payload["revision"]["previous_content"] == previous.model_dump(mode="json")
     assert payload["revision"]["current_lengths"]["knowledge_base_article"] > 0
 
@@ -168,7 +168,7 @@ async def test_content_service_retries_when_shorter_revision_is_not_shorter() ->
     ] == "SHORTER"
 
 
-async def test_content_service_retries_when_channel_template_is_incomplete() -> None:
+async def test_content_service_retries_when_telegram_post_is_too_short() -> None:
     incomplete = content_response()
     incomplete["telegram_post"] = "Коротке повідомлення без обов'язкових блоків."
     provider = FakeProvider([incomplete, content_response()])
@@ -178,4 +178,22 @@ async def test_content_service_retries_when_channel_template_is_incomplete() -> 
 
     assert len(provider.calls) == 2
     assert "Що зробити:" in result.telegram_post
-    assert "пропускає обов'язкові рядки" in provider.calls[1]["user_payload"]["validation_error"]
+    assert "короткий текст потребує content_warnings" in provider.calls[1]["user_payload"]["validation_error"]
+
+
+async def test_content_service_accepts_adaptive_headings_and_adds_official_source() -> None:
+    adaptive = content_response()
+    adaptive["telegram_post"] = (
+        "Роз'яснення ДПС: первинні документи для ФОП\n\n"
+        + "ФОП мають зберігати документи, що підтверджують облік доходів. "
+        "Строк залежить від типу документів, а окремі випадки мають винятки. "
+        * 8
+    )
+    provider = FakeProvider([adaptive])
+    service = AIContentService(provider, model="mock")
+
+    result, _ = await service.generate(stage_input(), analysis())
+
+    assert len(provider.calls) == 1
+    assert "Що змінилося:" not in result.telegram_post
+    assert result.telegram_post.endswith("Джерело: https://example.test")
