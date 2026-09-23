@@ -301,7 +301,7 @@ async def test_repeated_approve_callback_publishes_only_once() -> None:
     assert version.version_metadata["stage3"]["message_id"] == "201"
     assert version.version_metadata["stage3"]["article_message_ids"] == []
     assert telegram.published_texts[0].startswith("<b>Тестова зміна</b>")
-    assert "Джерело: example.com — https://example.com/law" in telegram.published_texts[0]
+    assert "🔗 <b>Джерело:</b> example.com — https://example.com/law" in telegram.published_texts[0]
     assert "#ПДВ" in telegram.published_texts[0]
     assert telegram.parse_modes == ["HTML"]
     assert len(telegram.published_texts) == 1
