@@ -98,3 +98,41 @@ async def test_relevance_service_retries_once_on_schema_validation_error() -> No
     assert result.relevant is True
     assert len(provider.calls) == 2
     assert "validation_error" in provider.calls[1]["user_payload"]
+
+
+async def test_relevance_prompt_keeps_tax_return_form_changes_in_scope() -> None:
+    provider = FakeProvider([{
+        "relevant": True,
+        "categories": ["TAX_REPORTING"],
+        "reason": "Зміна форми податкової декларації впливає на звітність.",
+        "confidence": 0.9,
+    }])
+    await AIRelevanceService(provider, model="mock").classify(stage_input())
+
+    prompt = provider.calls[0]["system_prompt"]
+    assert "форми податкової декларації" in prompt
+    assert "relevant=true" in prompt
+    assert provider.calls[0]["user_payload"]["schema_version"] == "v2"
+
+
+async def test_tax_declaration_form_change_overrides_ai_false_negative() -> None:
+    provider = FakeProvider([{
+        "relevant": False,
+        "categories": [],
+        "reason": "Технічна зміна.",
+        "confidence": 0.95,
+    }])
+    source = stage_input().model_copy(
+        update={
+            "title": (
+                "Наказ про внесення змін до форми Податкової декларації "
+                "з транспортного податку"
+            )
+        }
+    )
+
+    result, _ = await AIRelevanceService(provider, model="mock").classify(source)
+
+    assert result.relevant is True
+    assert "TAX_REPORTING" in {str(category) for category in result.categories}
+    assert result.decision_metadata.decision == "relevant"

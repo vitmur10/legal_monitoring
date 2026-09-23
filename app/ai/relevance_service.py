@@ -1,8 +1,10 @@
+import re
+
 from pydantic import ValidationError
 
 from app.ai.prompts import RELEVANCE_PROMPT_VERSION, RELEVANCE_SYSTEM_PROMPT
 from app.ai.provider import AIProvider, AIResponse
-from app.ai.schemas import DecisionMetadata, RelevanceResult, Stage2Input
+from app.ai.schemas import DecisionMetadata, RelevanceCategory, RelevanceResult, Stage2Input
 from app.diff.schemas import DocumentDiffResult
 
 
@@ -54,6 +56,7 @@ class AIRelevanceService:
             )
             try:
                 result = RelevanceResult.model_validate(self._extract_result(response.data))
+                result = self._apply_tax_reporting_override(result, stage_input.title)
                 result.decision_metadata = self._decision_metadata(result)
                 return result, response
             except ValidationError as exc:
@@ -68,6 +71,30 @@ class AIRelevanceService:
         else:
             band = "low_confidence"
         return DecisionMetadata(decision="relevant" if result.relevant else "filtered_out", confidence_band=band)
+
+    @staticmethod
+    def _apply_tax_reporting_override(result: RelevanceResult, title: str) -> RelevanceResult:
+        normalized_title = title.casefold()
+        names_tax_declaration = bool(
+            re.search(r"податков\w*\s+(?:деклараці\w*|звітн\w*)", normalized_title)
+        )
+        changes_form_or_rules = any(
+            phrase in normalized_title
+            for phrase in ("внесення змін", "змін до форми", "затвердження форми", "нової форми")
+        )
+        if result.relevant or not (names_tax_declaration and changes_form_or_rules):
+            return result
+        categories = list(result.categories)
+        if RelevanceCategory.TAX_REPORTING not in categories:
+            categories.append(RelevanceCategory.TAX_REPORTING)
+        return result.model_copy(
+            update={
+                "relevant": True,
+                "categories": categories,
+                "reason": "Назва вказує на зміни до форми податкової декларації; документ передано на аналіз звітності.",
+                "confidence": max(result.confidence, 0.9),
+            }
+        )
 
     def _clip(self, text: str) -> str:
         return text if len(text) <= self.max_input_chars else text[: self.max_input_chars]
