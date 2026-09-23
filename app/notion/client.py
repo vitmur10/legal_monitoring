@@ -96,6 +96,24 @@ class NotionClient:
             "properties": changes,
         })
 
+    async def backfill_document_date_if_empty(self, page_id: str, document_date: str) -> bool:
+        """Fill only an empty document-date property on an existing Notion page."""
+        try:
+            normalized_date = datetime.fromisoformat(str(document_date)).date().isoformat()
+        except ValueError:
+            return False
+        property_name = self.property_map.get("Дата документа", "Дата документа")
+        page = await self._request("GET", f"/pages/{page_id}", {})
+        date_property = (page.get("properties") or {}).get(property_name)
+        if not date_property or date_property.get("type") != "date":
+            return False
+        if date_property.get("date"):
+            return False
+        await self._request("PATCH", f"/pages/{page_id}", {
+            "properties": {property_name: {"date": {"start": normalized_date}}}
+        })
+        return True
+
     def _page_payload(self, title: str, analysis: dict[str, Any], article: str, document_id: int,
                       version_id: int, content_version: int, version_key: str,
                       telegram_message_id: str | None, previous_page_id: str | None) -> dict[str, Any]:

@@ -30,6 +30,19 @@ class Adapter:
         return KnowledgeBasePublicationResult(status="PUBLISHED", page_id=f"page-{len(self.calls)}", page_url="https://example.test/page")
 
 
+class ExistingNotionPage(NotionClient):
+    def __init__(self, existing_date=None):
+        super().__init__(token="test-only", database_id="test-only", enabled=True)
+        self.existing_date = existing_date
+        self.requests = []
+
+    async def _request(self, method, path, payload):
+        self.requests.append((method, path, payload))
+        if method == "GET":
+            return {"properties": {"Дата документа": {"type": "date", "date": self.existing_date}}}
+        return {}
+
+
 def setup(fail=False):
     version, telegram, adapter = analyzed_version(), FakeTelegram(), Adapter(fail)
     service = ReviewService(FakeRepository(version), telegram, moderation_client=telegram,
@@ -47,6 +60,31 @@ async def test_telegram_choice_and_later_addition():
     await workflow.handle_update(callback("a"))
     assert telegram.publications == 1 and len(adapter.calls) == 1
     assert version.version_metadata["stage3"]["knowledge_base_publications"]["1"]["page_id"]
+
+
+async def test_notion_uses_official_order_date_when_ai_analysis_omits_it():
+    version, telegram, adapter, service, _ = setup()
+    version.version_metadata["order_date"] = "2026-06-12"
+    version.version_metadata["stage3"] = {"status": "PUBLISHED", "content_version": 1}
+
+    result = await service.publish_to_knowledge_base(version.id)
+
+    assert result.status == "PUBLISHED"
+    assert adapter.calls[0]["analysis"]["document_date"] == "2026-06-12"
+
+
+def test_public_channel_post_keeps_title_bold_and_includes_source():
+    post = ReviewService.render_channel_post(
+        "Короткий текст новини.",
+        title="Назва матеріалу",
+        source_url="https://mof.gov.ua/uk/orders",
+        tags=["Податки"],
+    )
+
+    assert post.startswith("<b>Назва матеріалу</b>")
+    assert "Короткий текст новини." in post
+    assert "Джерело: mof.gov.ua" in post
+    assert "#Податки" in post
 
 
 async def test_combined_choice_retry_does_not_repeat_telegram():
@@ -104,6 +142,28 @@ def test_ukrainian_notion_properties_and_full_article():
     payload = client._page_payload("Назва", {"source_published_at": "2026-09-09"}, "Текст статті", 1, 2, 1, "key", None, None)
     assert payload["properties"]["Дата публікації джерела"]["date"]["start"] == "2026-09-09"
     assert "".join(t["text"]["content"] for t in props["Повний текст статті"]["rich_text"]) == "Стаття" * 1000
+
+
+async def test_notion_backfill_fills_only_an_empty_document_date():
+    client = ExistingNotionPage()
+
+    updated = await client.backfill_document_date_if_empty("page-1", "2026-06-12")
+
+    assert updated is True
+    assert client.requests[-1] == (
+        "PATCH",
+        "/pages/page-1",
+        {"properties": {"Дата документа": {"date": {"start": "2026-06-12"}}}},
+    )
+
+
+async def test_notion_backfill_does_not_overwrite_an_existing_date():
+    client = ExistingNotionPage({"start": "2026-06-13"})
+
+    updated = await client.backfill_document_date_if_empty("page-1", "2026-06-12")
+
+    assert updated is False
+    assert [request[0] for request in client.requests] == ["GET"]
 
 
 async def test_moderation_card_and_buttons():

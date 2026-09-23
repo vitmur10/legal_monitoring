@@ -170,6 +170,15 @@ class ReviewService:
             if version.document.published_at
             else None
         )
+        # Minfin order rows carry the signed date in source metadata. The AI can
+        # leave document_date empty, but Notion's Date property should still be
+        # populated from this authoritative source field.
+        source_metadata = metadata
+        analysis["document_date"] = (
+            analysis.get("document_date")
+            or source_metadata.get("document_date")
+            or source_metadata.get("order_date")
+        )
         analysis.setdefault("document_type", version.document.document_type)
         attempt_id = await self._start_attempt(version, "knowledge_base", content.knowledge_base_article)
         result = await self.knowledge_base_service.publish_to_knowledge_base(
