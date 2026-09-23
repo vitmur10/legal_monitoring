@@ -113,6 +113,20 @@ async def test_content_service_generates_article_and_telegram_post() -> None:
     assert provider.calls[0]["max_output_tokens"] == 2600
 
 
+async def test_content_service_warns_when_sparse_source_yields_short_article() -> None:
+    sparse = content_response()
+    sparse["knowledge_base_article"] = "Наказ змінює форму декларації. " * 6
+    provider = FakeProvider([sparse])
+    short_input = stage_input().model_copy(update={"normalized_text": "Наказ № 313 змінює форму декларації."})
+    service = AIContentService(provider, model="mock")
+
+    result, _ = await service.generate(short_input, analysis())
+
+    assert len(provider.calls) == 1
+    assert result.content_warnings
+    assert "повний текст документа" in result.content_warnings[0]
+
+
 async def test_content_service_unwraps_nested_result() -> None:
     provider = FakeProvider([{"content": content_response()}])
     service = AIContentService(provider, model="mock")
@@ -137,7 +151,7 @@ async def test_revision_payload_contains_format_rules_and_previous_content() -> 
     )
 
     payload = provider.calls[0]["user_payload"]
-    assert payload["schema_version"] == "v4"
+    assert payload["schema_version"] == "v5"
     assert payload["revision"]["previous_content"] == previous.model_dump(mode="json")
     assert payload["revision"]["current_lengths"]["knowledge_base_article"] > 0
 

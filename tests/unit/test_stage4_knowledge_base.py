@@ -168,11 +168,15 @@ async def test_notion_backfill_does_not_overwrite_an_existing_date():
 
 async def test_moderation_card_and_buttons():
     version, telegram, adapter, service, workflow = setup()
+    version.version_metadata["stage2"]["content"]["content_warnings"] = [
+        "Звірте матеріал із повним текстом наказу."
+    ]
     item = (await service.list_items())[0]
     text = service._render_moderation_card(item, 1)
     for field in ["Статус документа", "Дата документа", "Дата публікації на джерелі", "Набрання чинності", "Важливість", "Кого стосується", "Рекомендація щодо Бази", "Причина рекомендації", "Сайт-джерело", "Офіційне джерело"]:
         assert field in text
     assert "Прийнятий" in text and "VAT_PAYERS" not in text
+    assert "Звірте матеріал із повним текстом наказу." in text
     buttons = TelegramBotClient._review_markup(10, 1)["inline_keyboard"]
     assert {b["text"] for row in buttons for b in row} >= {"📢 Telegram", "📚 Telegram + База", "✏️ Виправити", "❌ Відхилити", "📚 Додати в Базу"}
 

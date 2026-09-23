@@ -101,6 +101,9 @@ class AIContentService:
                 if stage_input.official_url
                 else analysis.official_source_url,
             )
+            generated = self._explain_sparse_source(
+                generated, stage_input, analysis, revision_comment=revision_comment
+            )
             format_error = self._validate_format(
                 generated,
                 analysis,
@@ -112,6 +115,36 @@ class AIContentService:
                 return generated, response
             last_error = ValueError(format_error)
         raise last_error or RuntimeError("Content generation failed")
+
+    def _explain_sparse_source(
+        self,
+        generated: ContentGenerationResult,
+        stage_input: Stage2Input,
+        analysis: FullAnalysisResult,
+        *,
+        revision_comment: str | None = None,
+    ) -> ContentGenerationResult:
+        article_min = 600 if revision_comment else 1200
+        if len(generated.knowledge_base_article) >= article_min or generated.content_warnings:
+            return generated
+        if len(stage_input.normalized_text.strip()) >= article_min:
+            return generated
+
+        missing = [item.strip() for item in analysis.missing_information if item.strip()]
+        if missing:
+            detail = "; ".join(missing[:3])
+            warning = (
+                f"У доступному тексті джерела бракує таких відомостей: {detail}. "
+                "Статтю обмежено підтвердженими фактами; перед використанням звірте її "
+                "з повним текстом документа."
+            )
+        else:
+            warning = (
+                "Джерело містить лише короткий опис, а не повний текст документа. Статтю "
+                "обмежено доступними фактами; перед використанням звірте її з повним "
+                "текстом документа."
+            )
+        return generated.model_copy(update={"content_warnings": [warning]})
 
     def _extract_result(self, data: dict) -> dict:
         if {"knowledge_base_article", "telegram_post"}.issubset(data):

@@ -36,6 +36,7 @@ class ReviewItemRead(BaseModel):
     knowledge_base_recommendation: KnowledgeBaseRecommendationResult = Field(default_factory=KnowledgeBaseRecommendationResult)
     telegram_post: str
     knowledge_base_article: str
+    content_warnings: list[str] = Field(default_factory=list)
     review_metadata: dict[str, Any] = Field(default_factory=dict)
 
 

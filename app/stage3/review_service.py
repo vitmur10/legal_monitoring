@@ -801,6 +801,7 @@ class ReviewService:
             knowledge_base_recommendation=analysis.get("knowledge_base_recommendation") or {},
             telegram_post=content.telegram_post,
             knowledge_base_article=content.knowledge_base_article,
+            content_warnings=content.content_warnings,
             review_metadata=metadata.get("stage3") or {},
         )
 
@@ -812,6 +813,8 @@ class ReviewService:
             if item.source_published_at
             else "не визначена"
         )
+        warning_text = "\n".join(item.content_warnings)[:500]
+        warning_text = f"ПОПЕРЕДЖЕННЯ\n{warning_text}\n\n" if warning_text else ""
         text = (
             "МАТЕРІАЛ НА ПОГОДЖЕННЯ\n"
             f"Draft v{content_version}\n\n"
@@ -819,6 +822,7 @@ class ReviewService:
             f"{item.title[:200]}\n\n"
             "ПРЕВ'Ю ПУБЛІКАЦІЇ В КАНАЛІ\n"
             f"{self.render_channel_post(item.telegram_post)[:3000]}\n\n"
+            f"{warning_text}"
             "КЛЮЧОВІ ДАНІ\n"
             f"Важливість: {label(item.importance)}\n"
             f"Категорії: {categories}\n"

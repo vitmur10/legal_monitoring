@@ -75,10 +75,14 @@ async def main() -> None:
             print(f"Для версії {version.id} moderation card вже надіслано; повторної дії немає.")
             return
 
-        if current_status == "FILTERED_OUT":
+        if current_status in {"FILTERED_OUT", "AI_FAILED"}:
             relevance = stage2_metadata.get("relevance") or {}
-            if relevance.get("relevant") is not False:
-                raise SystemExit("Статус FILTERED_OUT не має relevance=false; нічого не змінено.")
+            expected_relevance = current_status == "AI_FAILED"
+            if relevance.get("relevant") is not expected_relevance:
+                raise SystemExit(
+                    f"Статус {current_status} має неочікуваний результат relevance; "
+                    "нічого не змінено."
+                )
             result = await stage2.process(
                 status=ProcessingStatus.NEW,
                 document=document,
@@ -98,7 +102,7 @@ async def main() -> None:
                 return
         elif current_status != "ANALYZED":
             raise SystemExit(
-                f"Поточний Stage 2 status={current_status!r}; очікувався FILTERED_OUT або "
+                f"Поточний Stage 2 status={current_status!r}; очікувався FILTERED_OUT/AI_FAILED або "
                 "ANALYZED без moderation card. Нічого не змінено."
             )
 
