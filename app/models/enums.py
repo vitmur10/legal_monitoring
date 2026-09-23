@@ -1,0 +1,26 @@
+from enum import StrEnum
+
+
+class ProcessingStatus(StrEnum):
+    NEW = "NEW"
+    UNCHANGED = "UNCHANGED"
+    CHANGED = "CHANGED"
+    FAILED = "FAILED"
+
+
+class MonitoringRunStatus(StrEnum):
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class RelationType(StrEnum):
+    AMENDS = "AMENDS"
+    AMENDED_BY = "AMENDED_BY"
+    EXPLAINS = "EXPLAINS"
+    EXPLAINED_BY = "EXPLAINED_BY"
+    IMPLEMENTS = "IMPLEMENTS"
+    IMPLEMENTED_BY = "IMPLEMENTED_BY"
+    RELATED_TO = "RELATED_TO"
+    SUPERSEDES = "SUPERSEDES"
+    SUPERSEDED_BY = "SUPERSEDED_BY"

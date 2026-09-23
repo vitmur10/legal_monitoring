@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.sqlite
+.venv/
+postgres_data/
+.idea/
+*.log
+runtime/
