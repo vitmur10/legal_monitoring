@@ -815,13 +815,15 @@ class ReviewService:
         )
         warning_text = "\n".join(item.content_warnings)[:500]
         warning_text = f"ПОПЕРЕДЖЕННЯ\n{warning_text}\n\n" if warning_text else ""
+        channel_preview = self.render_channel_post(item.telegram_post)[:3000]
+        channel_preview = re.sub(r"</?b>", "", channel_preview)
         text = (
             "МАТЕРІАЛ НА ПОГОДЖЕННЯ\n"
             f"Draft v{content_version}\n\n"
             "ТЕМА\n"
             f"{item.title[:200]}\n\n"
             "ПРЕВ'Ю ПУБЛІКАЦІЇ В КАНАЛІ\n"
-            f"{self.render_channel_post(item.telegram_post)[:3000]}\n\n"
+            f"{channel_preview}\n\n"
             f"{warning_text}"
             "КЛЮЧОВІ ДАНІ\n"
             f"Важливість: {label(item.importance)}\n"
@@ -852,7 +854,7 @@ class ReviewService:
         sections: list[str] = []
         if title:
             sections.append(f"<b>{html.escape(title.strip()[:250])}</b>")
-        sections.append(html.escape(body[:3300]))
+        sections.append(ReviewService._render_channel_body(body[:3300]))
         if source_url:
             host = urlparse(source_url).hostname
             if source_url in body:
@@ -865,6 +867,37 @@ class ReviewService:
             if hashtags:
                 sections.append(" ".join(f"#{html.escape(tag)}" for tag in hashtags))
         return "\n\n".join(sections)[:4096]
+
+    @staticmethod
+    def _render_channel_body(text: str) -> str:
+        emoji_by_heading = {
+            "що змінилося": "📌",
+            "кого стосується": "👥",
+            "коли діє": "🗓️",
+            "дата": "🗓️",
+            "набрання чинності": "🗓️",
+            "практичний вплив": "💡",
+            "що зробити": "✅",
+            "джерело": "🔗",
+        }
+        heading_pattern = re.compile(
+            r"^(\s*)(?:🔎|📌|👥|🗓️|📅|💡|✅|🔗)?\s*"
+            r"(Що змінилося|Кого стосується|Коли діє|Дата|Набрання чинності|"
+            r"Практичний вплив|Що зробити|Джерело)\s*:(.*)$",
+            flags=re.IGNORECASE,
+        )
+        rendered_lines: list[str] = []
+        for line in text.splitlines():
+            match = heading_pattern.match(line)
+            if match is None:
+                rendered_lines.append(html.escape(line))
+                continue
+            indent, heading, remainder = match.groups()
+            emoji = emoji_by_heading[heading.casefold()]
+            rendered_lines.append(
+                f"{indent}{emoji} <b>{html.escape(heading)}:</b>{html.escape(remainder)}"
+            )
+        return "\n".join(rendered_lines)
 
     @staticmethod
     def _hashtags(values: list[str], limit: int = 3) -> list[str]:

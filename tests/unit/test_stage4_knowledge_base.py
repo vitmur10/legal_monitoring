@@ -83,6 +83,22 @@ def test_public_channel_post_keeps_title_bold_and_includes_source():
 
     assert post.startswith("<b>Назва матеріалу</b>")
     assert "Короткий текст новини." in post
+    formatted = ReviewService.render_channel_post(
+        "📌 Що змінилося: Оновлено правила.\n"
+        "👥 Кого стосується: Платників податків.\n"
+        "🗓️ Коли діє: З 1 липня.\n"
+        "💡 Практичний вплив: Треба оновити облік.\n"
+        "✅ Що зробити: Перевірити процеси.",
+        title="Назва матеріалу",
+    )
+    for heading in (
+        "📌 <b>Що змінилося:</b>",
+        "👥 <b>Кого стосується:</b>",
+        "🗓️ <b>Коли діє:</b>",
+        "💡 <b>Практичний вплив:</b>",
+        "✅ <b>Що зробити:</b>",
+    ):
+        assert heading in formatted
     assert "Джерело: mof.gov.ua" in post
     assert "#Податки" in post
 
@@ -177,6 +193,7 @@ async def test_moderation_card_and_buttons():
         assert field in text
     assert "Прийнятий" in text and "VAT_PAYERS" not in text
     assert "Звірте матеріал із повним текстом наказу." in text
+    assert "<b>" not in text
     buttons = TelegramBotClient._review_markup(10, 1)["inline_keyboard"]
     assert {b["text"] for row in buttons for b in row} >= {"📢 Telegram", "📚 Telegram + База", "✏️ Виправити", "❌ Відхилити", "📚 Додати в Базу"}
 
