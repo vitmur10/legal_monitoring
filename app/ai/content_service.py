@@ -1,3 +1,5 @@
+import re
+
 from pydantic import ValidationError
 
 from app.ai.prompts import CONTENT_PROMPT_VERSION, CONTENT_SYSTEM_PROMPT
@@ -111,6 +113,7 @@ class AIContentService:
                 current_content=current_content,
             )
             if format_error is None:
+                generated = self._restore_telegram_emojis(generated)
                 generated.knowledge_base_recommendation = analysis.knowledge_base_recommendation
                 return generated, response
             last_error = ValueError(format_error)
@@ -145,6 +148,39 @@ class AIContentService:
                 "текстом документа."
             )
         return generated.model_copy(update={"content_warnings": [warning]})
+
+    @staticmethod
+    def _restore_telegram_emojis(
+        generated: ContentGenerationResult,
+    ) -> ContentGenerationResult:
+        lines = generated.telegram_post.splitlines()
+        if not lines:
+            return generated
+
+        emoji_prefixes = ("🔎", "📌", "👥", "🗓️", "📅", "💡", "✅", "🔗")
+        first_content_line = next((i for i, line in enumerate(lines) if line.strip()), None)
+        if first_content_line is not None:
+            current = lines[first_content_line].lstrip()
+            if not current.startswith(emoji_prefixes):
+                indent = lines[first_content_line][: len(lines[first_content_line]) - len(current)]
+                lines[first_content_line] = f"{indent}🔎 {current}"
+
+        markers = (
+            ("📌", r"Що змінилося\s*:"),
+            ("👥", r"Кого стосується\s*:"),
+            ("🗓️", r"(?:Коли діє|Дата|Набрання чинності)\s*:"),
+            ("💡", r"Практичний вплив\s*:"),
+            ("✅", r"Що зробити\s*:"),
+            ("🔗", r"Джерело\s*:"),
+        )
+        for index, line in enumerate(lines):
+            for emoji, heading in markers:
+                pattern = rf"^(\s*)(?:{re.escape(emoji)}\s*)?({heading})"
+                updated = re.sub(pattern, rf"\1{emoji} \2", line, count=1, flags=re.IGNORECASE)
+                if updated != line:
+                    lines[index] = updated
+                    break
+        return generated.model_copy(update={"telegram_post": "\n".join(lines)})
 
     def _extract_result(self, data: dict) -> dict:
         if {"knowledge_base_article", "telegram_post"}.issubset(data):

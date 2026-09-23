@@ -90,6 +90,7 @@ def content_response() -> dict[str, Any]:
             "Оновлені правила застосовуються з 1 липня 2026 року.\n\n"
             "Що змінилося: оновлено порядок CRS 2.0.\n"
             "Кого стосується: підзвітних фінансових установ.\n"
+            "Практичний вплив: потрібно перевірити процеси та звітність.\n"
             "Що зробити: перевірити CRS onboarding, due diligence та звітність.\n"
             "Дата: 01.07.2026.\n"
             "Джерело: https://example.test\n\n"
@@ -109,6 +110,13 @@ async def test_content_service_generates_article_and_telegram_post() -> None:
 
     assert "CRS 2.0" in result.knowledge_base_article
     assert "01.07.2026" in result.telegram_post
+    assert result.telegram_post.startswith("🔎 ")
+    assert "📌 Що змінилося:" in result.telegram_post
+    assert "👥 Кого стосується:" in result.telegram_post
+    assert "🗓️ Дата:" in result.telegram_post
+    assert "💡 Практичний вплив:" in result.telegram_post
+    assert "✅ Що зробити:" in result.telegram_post
+    assert "🔗 Джерело:" in result.telegram_post
     assert response.usage.request_type == "content_generation"
     assert provider.calls[0]["max_output_tokens"] == 2600
 
@@ -151,7 +159,7 @@ async def test_revision_payload_contains_format_rules_and_previous_content() -> 
     )
 
     payload = provider.calls[0]["user_payload"]
-    assert payload["schema_version"] == "v5"
+    assert payload["schema_version"] == "v6"
     assert payload["revision"]["previous_content"] == previous.model_dump(mode="json")
     assert payload["revision"]["current_lengths"]["knowledge_base_article"] > 0
 
@@ -210,4 +218,5 @@ async def test_content_service_accepts_adaptive_headings_and_adds_official_sourc
 
     assert len(provider.calls) == 1
     assert "Що змінилося:" not in result.telegram_post
-    assert result.telegram_post.endswith("Джерело: https://example.test")
+    assert result.telegram_post.startswith("🔎 ")
+    assert result.telegram_post.endswith("🔗 Джерело: https://example.test")
