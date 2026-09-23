@@ -99,7 +99,40 @@ def test_public_channel_post_keeps_title_bold_and_includes_source():
         "✅ <b>Що зробити:</b>",
     ):
         assert heading in formatted
-    assert "Джерело: mof.gov.ua" in post
+    assert "🔗 <b>Джерело:</b> mof.gov.ua" in post
+    assert "#Податки" in post
+
+
+def test_public_channel_post_builds_bold_sections_from_structured_analysis():
+    post = ReviewService.render_channel_post(
+        "Загальний текст без структурованих підзаголовків.",
+        title="Наказ про зміну форми декларації",
+        source_url="https://mof.gov.ua/orders/313",
+        tags=["Податки"],
+        analysis={
+            "summary": "Оновлено форму декларації з транспортного податку.",
+            "changes": [{"explanation": "Змінено окремі поля форми."}],
+            "affected_entities_explanation": "Платників транспортного податку.",
+            "document_date": "2026-06-12",
+            "practical_impact": "Під час звітування слід використовувати оновлену форму.",
+            "required_actions": ["Перевірити актуальність форми перед поданням."],
+        },
+    )
+
+    assert post.startswith("<b>Наказ про зміну форми декларації</b>")
+    for heading in (
+        "📌 <b>Що змінилося:</b>",
+        "👥 <b>Кого стосується:</b>",
+        "🗓️ <b>Коли діє:</b>",
+        "💡 <b>Практичний вплив:</b>",
+        "✅ <b>Що зробити:</b>",
+        "🔗 <b>Джерело:</b>",
+    ):
+        assert heading in post
+    assert "Змінено окремі поля форми." in post
+    assert "Платників транспортного податку." in post
+    assert "https://mof.gov.ua/orders/313" in post
+    assert "Загальний текст без структурованих підзаголовків." not in post
     assert "#Податки" in post
 
 

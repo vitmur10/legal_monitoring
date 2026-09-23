@@ -400,6 +400,7 @@ class ReviewService:
             content.telegram_post,
             title=version.document.title,
             source_url=version.document.canonical_url or analysis.get("official_source_url"),
+            analysis=analysis,
             tags=self._hashtags(
                 [label(value) for value in (analysis.get("topics") or analysis.get("categories") or [])]
             ),
@@ -802,6 +803,17 @@ class ReviewService:
             telegram_post=content.telegram_post,
             knowledge_base_article=content.knowledge_base_article,
             content_warnings=content.content_warnings,
+            post_format_data={
+                "summary": analysis.get("summary"),
+                "changes": analysis.get("changes") or [],
+                "affected_entities_explanation": analysis.get("affected_entities_explanation"),
+                "affected_entities": analysis.get("affected_entities") or [],
+                "application_date": analysis.get("application_date"),
+                "effective_date": analysis.get("effective_date"),
+                "document_date": analysis.get("document_date"),
+                "practical_impact": analysis.get("practical_impact"),
+                "required_actions": analysis.get("required_actions") or [],
+            },
             review_metadata=metadata.get("stage3") or {},
         )
 
@@ -815,7 +827,9 @@ class ReviewService:
         )
         warning_text = "\n".join(item.content_warnings)[:500]
         warning_text = f"ПОПЕРЕДЖЕННЯ\n{warning_text}\n\n" if warning_text else ""
-        channel_preview = self.render_channel_post(item.telegram_post)[:3000]
+        channel_preview = self.render_channel_post(
+            item.telegram_post, analysis=item.post_format_data
+        )[:3000]
         channel_preview = re.sub(r"</?b>", "", channel_preview)
         text = (
             "МАТЕРІАЛ НА ПОГОДЖЕННЯ\n"
@@ -847,8 +861,11 @@ class ReviewService:
         title: str | None = None,
         source_url: str | None = None,
         tags: list[str] | None = None,
+        analysis: dict[str, Any] | None = None,
     ) -> str:
         body = ReviewService._clean_plain_markdown(text)
+        if analysis and not ReviewService._has_required_channel_sections(body):
+            body = ReviewService._channel_sections_from_analysis(analysis)
         if title and body.splitlines() and body.splitlines()[0].strip().casefold() == title.strip().casefold():
             body = "\n".join(body.splitlines()[1:]).lstrip()
         sections: list[str] = []
@@ -858,15 +875,70 @@ class ReviewService:
         if source_url:
             host = urlparse(source_url).hostname
             if source_url in body:
-                source_line = f"Джерело: {host}" if host else "Джерело: офіційне посилання наведено вище"
+                source_value = host or "офіційне посилання наведено вище"
             else:
-                source_line = f"Джерело: {host} — {source_url}" if host else f"Джерело: {source_url}"
-            sections.append(html.escape(source_line))
+                source_value = f"{host} — {source_url}" if host else source_url
+            sections.append(f"🔗 <b>Джерело:</b> {html.escape(source_value)}")
         if tags:
             hashtags = ReviewService._hashtags(tags)
             if hashtags:
                 sections.append(" ".join(f"#{html.escape(tag)}" for tag in hashtags))
         return "\n\n".join(sections)[:4096]
+
+    @staticmethod
+    def _has_required_channel_sections(text: str) -> bool:
+        required = (
+            "Що змінилося",
+            "Кого стосується",
+            "Коли діє",
+            "Практичний вплив",
+            "Що зробити",
+        )
+        return all(
+            re.search(rf"(?im)^\s*(?:🔎|📌|👥|🗓️|📅|💡|✅|🔗)?\s*{re.escape(heading)}\s*:", text)
+            for heading in required
+        )
+
+    @staticmethod
+    def _channel_sections_from_analysis(analysis: dict[str, Any]) -> str:
+        def compact(value: Any, limit: int = 700) -> str:
+            return " ".join(str(value or "").split())[:limit]
+
+        changes = []
+        for change in analysis.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            explanation = compact(change.get("explanation"))
+            if not explanation:
+                before, after = compact(change.get("before"), 250), compact(change.get("after"), 250)
+                explanation = f"Було: {before}. Стало: {after}." if before and after else after or before
+            if explanation:
+                changes.append(explanation)
+        audience = compact(analysis.get("affected_entities_explanation"))
+        if not audience:
+            audience = ", ".join(label(value) for value in analysis.get("affected_entities") or [])
+        when = analysis.get("application_date") or analysis.get("effective_date")
+        if when:
+            when_text = f"Набрання чинності / застосування: {compact(when, 100)}."
+        elif analysis.get("document_date"):
+            when_text = (
+                f"Дата документа: {compact(analysis['document_date'], 100)}; "
+                "окрему дату набрання чинності не визначено."
+            )
+        else:
+            when_text = "Дату набрання чинності за доступними даними не визначено."
+        actions = [compact(value, 250) for value in analysis.get("required_actions") or []]
+        actions = [value for value in actions if value]
+        lines = [
+            f"🔎 {compact(analysis.get('summary')) or 'Офіційне оновлення.'}",
+            "",
+            f"📌 Що змінилося: {' '.join(changes) if changes else 'Конкретні зміни за доступними даними не визначені.'}",
+            f"👥 Кого стосується: {audience or 'Коло адресатів за доступними даними не визначено.'}",
+            f"🗓️ Коли діє: {when_text}",
+            f"💡 Практичний вплив: {compact(analysis.get('practical_impact')) or 'Практичний вплив за доступними даними не уточнено.'}",
+            f"✅ Що зробити: {' '.join(actions) if actions else 'Конкретні дії за доступними даними не визначені.'}",
+        ]
+        return "\n".join(lines)
 
     @staticmethod
     def _render_channel_body(text: str) -> str:

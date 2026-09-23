@@ -37,6 +37,7 @@ class ReviewItemRead(BaseModel):
     telegram_post: str
     knowledge_base_article: str
     content_warnings: list[str] = Field(default_factory=list)
+    post_format_data: dict[str, Any] = Field(default_factory=dict)
     review_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
